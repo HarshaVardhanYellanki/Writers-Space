@@ -1,0 +1,589 @@
+<!DOCTYPE html>
+<html>
+
+<head>
+  <meta charset="UTF-8" />
+  <title>JustVibeUs - Writer's Space</title>
+
+  <script src="https://unpkg.com/react@18/umd/react.development.js"></script>
+  <script src="https://unpkg.com/react-dom@18/umd/react-dom.development.js"></script>
+  <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+  <script src="https://unpkg.com/docx@8.0.3/build/index.js"></script>
+
+  <style>
+    body {
+      margin: 0;
+      font-family: Courier, monospace;
+      background: #121212;
+    }
+
+    .app {
+      display: flex;
+      height: 100vh;
+    }
+
+    .sidebar-left {
+      width: 220px;
+      background: #1c1c1c;
+      color: white;
+      padding: 15px;
+      overflow-y: auto;
+      border-right: 1px solid #333;
+    }
+
+    .sidebar-right {
+      width: 260px;
+      background: #111;
+      color: #ddd;
+      padding: 20px;
+      border-left: 1px solid #333;
+    }
+
+    .editor-container {
+      flex: 1;
+      overflow: auto;
+      background: #1a1a1a;
+    }
+
+    .topbar {
+      background: #222;
+      padding: 8px 12px;
+      display: flex;
+      gap: 10px;
+      flex-wrap: wrap;
+      border-bottom: 1px solid #333;
+      position: sticky;
+      top: 0;
+    }
+
+    button {
+      padding: 5px 10px;
+      font-size: 12px;
+      background: #333;
+      color: white;
+      border: none;
+      cursor: pointer;
+    }
+
+    button:hover {
+      background: #555;
+    }
+
+    .page {
+      width: 8.5in;
+      min-height: 11in;
+      background: white;
+      margin: 40px auto;
+      padding: 1in 1in 1in 1.5in;
+      font-size: 12pt;
+      line-height: 1.4;
+      box-shadow: 0 0 20px rgba(0, 0, 0, 0.6);
+    }
+
+    .block {
+      margin-bottom: 12px;
+      outline: none;
+      white-space: pre-wrap;
+    }
+
+    .block.active {
+      background: rgba(0, 0, 0, 0.05);
+    }
+
+    .scene {
+      text-transform: uppercase;
+      font-weight: bold;
+    }
+
+    .character {
+      margin-left: 3.7in;
+      text-transform: uppercase;
+    }
+
+    .dialogue {
+      margin-left: 2.5in;
+      margin-right: 2in;
+    }
+
+    .parenthetical {
+      margin-left: 3.1in;
+      margin-right: 2.3in;
+    }
+
+    .transition {
+      text-align: right;
+      text-transform: uppercase;
+    }
+
+    .shot {
+      text-transform: uppercase;
+      font-weight: bold;
+      margin-left: 1.5in;
+    }
+
+    .scene-item {
+      padding: 5px;
+      cursor: pointer;
+    }
+
+    .scene-item:hover {
+      background: #333;
+    }
+
+    .page-break {
+      border-top: 2px dashed #bbb;
+      margin: 20px 0;
+      position: relative;
+    }
+
+    .page-break::after {
+      content: "Page Break";
+      position: absolute;
+      right: 10px;
+      top: -10px;
+      font-size: 10px;
+      color: #888;
+      background: #1a1a1a;
+      padding: 0 5px;
+    }
+
+.watermark {
+  position: fixed;
+  bottom: 10px;
+  right: 20px;
+  color: rgba(255,255,255,0.15);
+  font-size: 14px;
+  pointer-events: none;
+  user-select: none;
+  font-weight: bold;
+  letter-spacing: 1px;
+}
+  </style>
+</head>
+
+<body>
+  <div id="root"></div>
+
+  <script type="text/babel">
+
+    const ELEMENTS = ["scene", "action", "character", "dialogue", "parenthetical", "transition", "shot"];
+
+    const INFO = {
+      scene: "Scene heading. Example: INT. HOUSE - DAY",
+      action: "Describe visual events.",
+      character: "Character name (uppercase).",
+      dialogue: "Spoken lines.",
+      parenthetical: "Actor direction.",
+      transition: "CUT TO:, FADE OUT:",
+      shot: "Camera direction."
+    };
+
+    function App() {
+
+      const [zoom, setZoom] = React.useState(1);
+      const [projects, setProjects] = React.useState(JSON.parse(localStorage.getItem("projects")) || {});
+      const [projectName, setProjectName] = React.useState("");
+      const [blocks, setBlocks] = React.useState([{ type: "scene", content: "INT. ROOM - DAY" }]);
+      const [active, setActive] = React.useState(0);
+
+      // focus
+      React.useEffect(() => {
+        const el = document.querySelectorAll(".block")[active];
+        if (el) el.focus();
+      }, [active]);
+
+      // autosave (no loop)
+      React.useEffect(() => {
+        if (!projectName) return;
+
+        localStorage.setItem("projects", JSON.stringify({
+          ...projects,
+          [projectName]: blocks
+        }));
+      }, [blocks]);
+
+      const update = (i, value) => {
+        const copy = [...blocks];
+        copy[i].content = value || "";
+        setBlocks(copy);
+      };
+
+      const changeType = (type) => {
+        const copy = [...blocks];
+        if (copy[active]) {
+          copy[active].type = type;
+          setBlocks(copy);
+        }
+      };
+
+      const addBlock = (i = active) => {
+        const copy = [...blocks];
+        copy.splice(i + 1, 0, { type: "action", content: "" });
+        setBlocks(copy);
+        setActive(i + 1);
+      };
+
+      const deleteBlock = () => {
+        if (blocks.length === 1) return;
+        const copy = [...blocks];
+        copy.splice(active, 1);
+        setBlocks(copy);
+        setActive(Math.max(0, active - 1));
+      };
+
+      const handleKey = (e, i) => {
+        if (e.key === "Enter") {
+          e.preventDefault();
+          addBlock(i);
+        }
+
+if (
+  e.key === "Backspace" &&
+  e.currentTarget.textContent.trim() === "" &&
+  blocks.length > 1
+) {
+  e.preventDefault();
+
+  const copy = [...blocks];
+
+  copy.splice(i, 1);
+
+  setBlocks(copy);
+
+  setActive(Math.max(0, i - 1));
+}
+
+        if (e.key === "Tab") {
+          e.preventDefault();
+          const idx = ELEMENTS.indexOf(blocks[i].type);
+          const copy = [...blocks];
+          copy[i].type = ELEMENTS[(idx + 1) % ELEMENTS.length];
+          setBlocks(copy);
+        }
+      };
+
+      // project
+      const saveProject = () => {
+        if (!projectName.trim()) return alert("Enter name");
+
+        const updated = { ...projects, [projectName]: blocks };
+        setProjects(updated);
+        localStorage.setItem("projects", JSON.stringify(updated));
+      };
+
+      const loadProject = (name) => {
+        if (projectName) {
+          const updated = { ...projects, [projectName]: blocks };
+          localStorage.setItem("projects", JSON.stringify(updated));
+        }
+
+        const data = projects[name] || [{ type: "scene", content: "INT. SCENE - DAY" }];
+        setProjectName(name);
+        setBlocks(data);
+        setActive(0);
+      };
+
+const deleteProject = (name) => {
+
+  const confirmDelete = window.confirm(
+    `Are you sure you want to delete "${name}"?`
+  );
+
+  if (!confirmDelete) return;
+
+  const updated = { ...projects };
+
+  delete updated[name];
+
+  setProjects(updated);
+
+  localStorage.setItem("projects", JSON.stringify(updated));
+
+  // reset editor if current project deleted
+  if (projectName === name) {
+    setProjectName("");
+    setBlocks([{ type: "scene", content: "INT. ROOM - DAY" }]);
+    setActive(0);
+  }
+};
+
+      const newProject = () => {
+        if (projectName) {
+          const updated = { ...projects, [projectName]: blocks };
+          localStorage.setItem("projects", JSON.stringify(updated));
+        }
+
+        const name = prompt("Enter project name");
+        if (!name) return;
+
+        setProjectName(name);
+        setBlocks([{ type: "scene", content: "INT. NEW SCENE - DAY" }]);
+        setActive(0);
+      };
+
+      // PDF
+      const exportPDF = () => {
+        const { jsPDF } = window.jspdf;
+        const doc = new jsPDF({ unit: "in", format: "letter" });
+
+        doc.setFont("Courier", "Normal");
+        doc.setFontSize(12);
+
+        const pageWidth = 8.5;
+        let y = 1;
+
+        blocks.forEach(b => {
+
+          let content = (
+            b.type === "scene" ||
+            b.type === "character" ||
+            b.type === "transition" ||
+            b.type === "shot"
+          ) ? b.content.toUpperCase() : b.content;
+
+          let x = 1.5, maxWidth = 6;
+
+          if (b.type === "character") { x = 3.7; maxWidth = 2.5; }
+          if (b.type === "dialogue") { x = 2.5; maxWidth = 8.5 - 2.5 - 2; }
+          if (b.type === "parenthetical") { x = 3.1; maxWidth = 8.5 - 3.1 - 2.3; }
+
+          if (b.type === "transition") {
+            const lines = doc.splitTextToSize(content, 3);
+            lines.forEach(line => {
+              const w = doc.getTextWidth(line);
+              const pos = pageWidth - 1 - w;
+              doc.text(line, pos, y);
+              y += 0.25;
+            });
+            return;
+          }
+
+          const lines = doc.splitTextToSize(content, maxWidth);
+          doc.text(lines, x, y);
+
+          y += lines.length * 0.22;
+
+          if (y > 10) {
+            doc.addPage();
+            y = 1;
+          }
+        });
+
+        doc.save("screenplay.pdf");
+      };
+
+      // WORD
+      const exportWord = async () => {
+        const { Document, Packer, Paragraph, TextRun } = window.docx;
+
+        const paragraphs = blocks.map(b => {
+
+          let left = 0, right = 0, align = "left";
+
+          if (b.type === "character") left = 3.7 * 720;
+
+          if (b.type === "dialogue") {
+            left = 2.5 * 720;
+            right = 2 * 720;
+          }
+
+          if (b.type === "parenthetical") {
+            left = 3.1 * 720;
+            right = 2.3 * 720;
+          }
+
+          if (b.type === "transition") align = "right";
+
+          return new Paragraph({
+            children: [
+              new TextRun({
+                text: (b.type === "scene" || b.type === "character" || b.type === "transition" || b.type === "shot")
+                  ? b.content.toUpperCase() : b.content,
+                bold: b.type === "scene"
+              })
+            ],
+            alignment: align,
+            indent: { left, right },
+            spacing: { after: 120 }
+          });
+        });
+
+        const doc = new Document({ sections: [{ children: paragraphs }] });
+        const blob = await Packer.toBlob(doc);
+
+        const link = document.createElement("a");
+        link.href = URL.createObjectURL(blob);
+        link.download = "screenplay.docx";
+        link.click();
+      };
+
+      const renderedBlocks = [];
+
+      let currentHeight = 0;
+      const PAGE_LIMIT = 1050;
+
+      blocks.forEach((b, i) => {
+
+        const temp = document.createElement("div");
+temp.className = `block ${b.type}`;
+temp.style.position = "absolute";
+temp.style.visibility = "hidden";
+temp.style.width = "6in";
+
+temp.innerText = b.content || "";
+
+document.body.appendChild(temp);
+
+const estimatedHeight = temp.offsetHeight;
+
+document.body.removeChild(temp);
+
+        const showBreak = currentHeight + estimatedHeight > PAGE_LIMIT;
+
+        if (showBreak) currentHeight = 0;
+
+        currentHeight += estimatedHeight;
+
+        if (showBreak) {
+          renderedBlocks.push(
+            <div key={"break-" + i} className="page-break"></div>
+          );
+        }
+
+        renderedBlocks.push(
+          <div
+            key={i}
+            className={`block ${b.type} ${i === active ? "active" : ""}`}
+            contentEditable
+            onFocus={() => setActive(i)}
+            onBlur={e => update(i, e.currentTarget.textContent)}
+            onKeyDown={e => handleKey(e, i)}
+          >
+            {b.content || ""}
+          </div>
+        );
+      });
+
+      return (
+        <div className="app">
+
+          <div className="sidebar-left">
+            <h3>Scenes</h3>
+            {blocks.map((b, i) => b.type === "scene" && (
+              <div key={i} className="scene-item"
+                onClick={() => {
+                  setActive(i);
+                  document.querySelectorAll(".block")[i]?.scrollIntoView({ behavior: "smooth" });
+                }}>
+                {b.content}
+              </div>
+            ))}
+
+            <h4>Projects</h4>
+            {Object.keys(projects).map(name => (
+  <div
+    key={name}
+    className="scene-item"
+    style={{
+      display: "flex",
+      justifyContent: "space-between",
+      alignItems: "center"
+    }}
+  >
+    <span
+      onClick={() => loadProject(name)}
+      style={{ flex: 1 }}
+    >
+      {name}
+    </span>
+
+    <span
+      onClick={() => deleteProject(name)}
+      style={{
+        color: "#ff6b6b",
+        cursor: "pointer",
+        marginLeft: "10px",
+        fontWeight: "bold"
+      }}
+    >
+      ×
+    </span>
+  </div>
+))}
+          </div>
+
+          <div className="editor-container">
+
+            <div className="topbar">
+              <button onClick={newProject}>New</button>
+
+              <input value={projectName}
+                onChange={e => setProjectName(e.target.value)}
+                placeholder="Project name" />
+
+              <button onClick={saveProject}>Save</button>
+
+              <select value={blocks[active]?.type || "action"}
+                onChange={e => changeType(e.target.value)}>
+                {ELEMENTS.map(el => <option key={el}>{el}</option>)}
+              </select>
+
+              <button onClick={deleteBlock}>Delete</button>
+              <button onClick={exportPDF}>PDF</button>
+              <button onClick={exportWord}>Word</button>
+
+              <button onClick={() => setZoom(z => Math.max(0.5, z - 0.1))}>-</button>
+              <button onClick={() => setZoom(z => Math.min(2, z + 0.1))}>+</button>
+              <button onClick={() => setZoom(window.innerWidth / 1000)}>Fit</button>
+            </div>
+
+            <div className="page" style={{
+              transform: `scale(${zoom})`,
+              transformOrigin: "top center"
+            }}>
+             {renderedBlocks}
+            </div>
+
+          </div>
+
+          <div className="sidebar-right">
+            <h3>{(blocks[active]?.type || "action").toUpperCase()}</h3>
+            <p>{INFO[blocks[active]?.type || "action"]}</p>
+            <hr />
+
+            <p><strong>Example:</strong></p>
+            <div style={{ background: "#222", padding: "8px" }}>
+              {
+                {
+                  scene: "INT. ROOM - DAY",
+                  action: "Arjun walks in.",
+                  character: "ARJUN",
+                  dialogue: "I was waiting.",
+                  parenthetical: "(smiles)",
+                  transition: "CUT TO:",
+                  shot: "CLOSE ON:"
+                }[blocks[active]?.type || "action"]
+              }
+            </div>
+
+            <hr />
+            <p>Enter → New block</p>
+            <p>Tab → Change type</p>
+          </div>
+
+<div className="watermark">
+  JustVibe'Us
+</div>
+
+        </div>
+      );
+    }
+
+    ReactDOM.createRoot(document.getElementById("root")).render(<App />);
+  </script>
+
+</body>
+
+</html>
